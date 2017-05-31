@@ -1,0 +1,119 @@
+$machine = Read-Host -Prompt 'Designate target computer'
+
+$destination = Read-Host -Prompt 'Directory to save to'
+
+# test for presence of output path
+$output = (Test-Path "$destination")
+     if ($output -eq "True") 
+    {write-host "Output path is good"}
+    else
+	{
+	#Prompt for directory Create
+	$title = "`nPath $destination Not Found"
+	$message = "Do you want me to create it? `n "
+	$yes = New-Object System.Management.Automation.Host.ChoiceDescription "&Yes", "Create the path. Any folders not present will be created"
+	$no = New-Object System.Management.Automation.Host.ChoiceDescription "&No", "Don't create path. Processing will not continue"
+	$options = [System.Management.Automation.Host.ChoiceDescription[]]($yes, $no)
+	$choice=$host.ui.PromptForChoice($title, $message, $options, 1)
+
+	If ($choice -eq "0")
+		{
+		New-Item "$Destination" -type directory 
+		}
+		else
+		{
+		write-host "`n Can't create path - exiting now. Press any key to exit..."
+		$x = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyup")
+		exit
+		}
+	}
+
+Function WaitForConnect
+{
+write-host "`n Now, we wait... `n"		
+
+Do { write-host "$machine has not responded yet..."
+     sleep 1
+	 } 
+	 until(test-connection -count 1 $machine -quiet)
+
+	 
+$sound = new-Object System.Media.SoundPlayer;
+$sound.SoundLocation="bell.wav";
+$sound.Play();
+
+Write-host -nonewline "`n `n Target Aquired! - $machine responded at "
+
+get-date -UFormat "%H:%M" 
+}
+
+&WaitforConnect
+
+# Return the last user logged in to a remote machine
+$reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine', $Machine)
+$regkey = $reg.OpenSubkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Authentication\\LogonUI")
+$user = $regkey.GetValue("LastLoggedOnUser").substring(4)
+
+Write-host "`n `n Last logged on user was $user. Starting history file collection... `n `n"
+
+# Copy history files to collection point
+
+Write-host "Internet Explorer history..."
+
+try{copy-item "\\$machine\C$\Users\$user\AppData\Local\Microsoft\Windows\WebCache\WebCacheV01.dat" -destination "$destination"}
+catch {$IEFail="Failed"
+		Write-host "Internet Explorer history locked! Moving on..."}
+
+Write-host "Google Chrome history..."
+copy-item "\\$machine\C$\Users\$user\AppData\Local\Google\Chrome\User Data\Default\history" -destination "$destination"
+Write-Host "Chrome Preferences"
+copy-item "\\$machine\C$\Users\$user\AppData\Local\Google\Chrome\User Data\Default\preferences" -destination "$destination"
+Write-host "Chrome Web Data"
+copy-item "\\$machine\C$\Users\$user\AppData\Local\Google\Chrome\User Data\Default\Web Data" -destination "$destination"
+Write-Host "Mozilla firefox history..."
+copy-item "\\$machine\C$\Users\$user\AppData\Roaming\Mozilla\Firefox\Profiles\*.default\places.sqlite" -destination "$destination"
+Write-host "History collection complete `n `n "
+
+# copy browser cache to collection point
+# write-host "Collecting caches - this may take a while. Press ctrl+C to quit at any time... `n"
+# Write-host "Internet Explorer cache..."
+# copy-item "\\$machine\C$\Users\$user\AppData\Local\Microsoft\Windows\INetCache\Low\IE\" -destination "$destination" -recurse
+# Write-host "Google Chrome cache..."
+# copy-item "\\$machine\C$\Users\$user\AppData\Local\Google\Chrome\User Data\Default\Cache" -destination "$destination" -recurse
+# Write-host "Mozilla Firefox cache..."
+# copy-item "\\$machine\C$\Users\$user\AppData\Local\Mozilla\Firefox\Profiles\*.default\cache2\entries" -destination "$destination" -recurse
+write-host "All done! `n"
+
+write-host "`n Process complete! `n"
+
+	#Option to reboot to get the IE history file
+	if ($IEFail -eq "Failed")
+	{
+	write-host "`n The Internet Explorer history file could not be copied. the target will need to be rebooted first `n `n"
+	write-host -foregroundcolor "red" "This option does not give the user time to save any work and may cause data loss!!!"
+	#Prompt for a course of action
+	$title = "Initiate reboot of target $machine"
+	$message = "Do you want to do this? `n "
+	$yes = New-Object System.Management.Automation.Host.ChoiceDescription "&Yes", "Reboot the remote computer. This may cause the user to lose work"
+	$no = New-Object System.Management.Automation.Host.ChoiceDescription "&No", "Don't reboot, just exit."
+	$options = [System.Management.Automation.Host.ChoiceDescription[]]($yes, $no)
+	$choice=$host.ui.PromptForChoice($title, $message, $options, 1)
+	If ($choice -eq "0")
+		{
+		#Reboot the target and capture the IE history file
+		Restart-Computer -computerName $machine -force
+		sleep 15
+		&WaitForConnect
+		Write-host "`n Copying Internet Explorer history... `n"
+		copy-item "\\$machine\C$\Users\$user\AppData\Local\Microsoft\Windows\WebCache\WebCacheV01.dat" -destination "$destination"
+		write-host "Internet Explorer History captured!"
+		}
+		else
+		{}
+	}
+	else
+	{Write-host "skipping target reboot `n"}
+	
+"Press any key to exit..."
+		$x = $host.UI.RawUI.ReadKey("NoEcho,IncludeKeyup")
+
